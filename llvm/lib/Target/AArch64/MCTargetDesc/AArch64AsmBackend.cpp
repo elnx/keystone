@@ -138,6 +138,77 @@ static unsigned AdrImmBits(unsigned Value) {
   return (hi19 << 5) | (lo2 << 29);
 }
 
+static bool isValidFixupValue(unsigned Kind, uint64_t Value) {
+  int64_t SignedValue = static_cast<int64_t>(Value);
+  switch (Kind) {
+  default:
+    return false;
+  case AArch64::fixup_aarch64_pcrel_adr_imm21:
+    if (SignedValue > 2097151 || SignedValue < -2097152)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_pcrel_adrp_imm21:
+    return true;
+  case AArch64::fixup_aarch64_ldr_pcrel_imm19:
+  case AArch64::fixup_aarch64_pcrel_branch19:
+    // Signed 21-bit immediate
+    if (SignedValue > 2097151 || SignedValue < -2097152)
+      return false;
+    // Low two bits are not encoded.
+    return true;
+  case AArch64::fixup_aarch64_add_imm12:
+  case AArch64::fixup_aarch64_ldst_imm12_scale1:
+    // Unsigned 12-bit immediate
+    if (Value >= 0x1000)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_ldst_imm12_scale2:
+    // Unsigned 12-bit immediate which gets multiplied by 2
+    if (Value & 1 || Value >= 0x2000)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_ldst_imm12_scale4:
+    // Unsigned 12-bit immediate which gets multiplied by 4
+    if (Value & 3 || Value >= 0x4000)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_ldst_imm12_scale8:
+    // Unsigned 12-bit immediate which gets multiplied by 8
+    if (Value & 7 || Value >= 0x8000)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_ldst_imm12_scale16:
+    // Unsigned 12-bit immediate which gets multiplied by 16
+    if (Value & 15 || Value >= 0x10000)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_movw:
+    return false;
+  case AArch64::fixup_aarch64_pcrel_branch14:
+    // Signed 16-bit immediate
+    if (SignedValue > 32767 || SignedValue < -32768)
+      return false;
+    // Low two bits are not encoded (4-byte alignment assumed).
+    if (Value & 0x3)
+      return false;
+    return true;
+  case AArch64::fixup_aarch64_pcrel_branch26:
+  case AArch64::fixup_aarch64_pcrel_call26:
+    // Signed 28-bit immediate
+    if (SignedValue > 134217727 || SignedValue < -134217728)
+      return false;
+    // Low two bits are not encoded (4-byte alignment assumed).
+    if (Value & 0x3)
+      return false;
+    return true;
+  case FK_Data_1:
+  case FK_Data_2:
+  case FK_Data_4:
+  case FK_Data_8:
+    return true;
+  }
+}
+
 static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   int64_t SignedValue = static_cast<int64_t>(Value);
   switch (Kind) {
@@ -256,6 +327,10 @@ void AArch64AsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
   if (!Value)
     return; // Doesn't change encoding.
   MCFixupKindInfo Info = getFixupKindInfo(Fixup.getKind());
+  if (!isValidFixupValue(Fixup.getKind(), Value)) {
+      KsError = KS_ERR_ASM_FIXUP_INVALID;
+      return;
+  }
   // Apply any target-specific value adjustments.
   Value = adjustFixupValue(Fixup.getKind(), Value);
 
